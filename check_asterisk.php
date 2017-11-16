@@ -14,8 +14,8 @@ function usage() {
             . "       -t read timeout" . PHP_EOL
             . "       -w unconnected peers WARNING threshold" . PHP_EOL
             . "       -c unconnected peers CRITICAL threshold" . PHP_EOL
-            . "       -W long call WARNING threshold (in seconds)" . PHP_EOL
-            . "       -C long call CRITICAL threshold (in seconds)" . PHP_EOL
+            . "       -W long call WARNING threshold (in seconds) (NOT IMPLEMENTED!)" . PHP_EOL
+            . "       -C long call CRITICAL threshold (in seconds) (NOT IMPLEMENTED!)" . PHP_EOL
             . PHP_EOL . "You need add new user in manager.conf:" . PHP_EOL
             . "[<USER>] ; username (-u option)" . PHP_EOL
             . "displayconnects = no" . PHP_EOL
