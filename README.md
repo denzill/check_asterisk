@@ -1,14 +1,15 @@
 # check_asterisk
 
-Icinga/Nagios plugin for checking asterisk status, ~~detect long calls~~, disconnected SIP peers and get some stats.
+[Icinga2](https://www.icinga.com/) or [Nagios](https://www.nagios.org/) plugin for checking asterisk status, ~~detect long calls~~, disconnected SIP peers and get some stats.
 
-Tested with **PHP 5.6** and **Asterisk 13.X**
+Tested with [PHP 5.6](http://php.net/), [Asterisk 13](https://www.asterisk.org/) and [Icinga2](https://www.icinga.com/)
 
 ## Installation
 
-- Copy [check_asterisk.php](check_asterisk.php) to Icinga/Nagios `PluginDir`
-- Copy [asterisk-commnand.conf](icinga/asterisk-command.conf) and [asterisk-service.conf](icinga/asterisk-service.conf) to `Icinga config dir/conf.d`, usually `/etc/icinga2/conf.d`
+- Copy [check_asterisk.php](check_asterisk.php) to [Icinga2](https://www.icinga.com/) or [Nagios](https://www.nagios.org/) `PluginDir`
+- Copy [asterisk-commnand.conf](icinga/asterisk-command.conf) and [asterisk-service.conf](icinga/asterisk-service.conf) to `Icinga2 config dir/conf.d`, usually `/etc/icinga2/conf.d`
 - Add new user in manager.conf from [manager.conf](asterisk/manager.conf)
+  - for more accurate detection of disconnect SIP peers add `qualify=yes` to peer definition
 
 ## How to use
 ```
