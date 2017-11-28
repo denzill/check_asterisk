@@ -1,6 +1,6 @@
 # check_asterisk
 
-Icinga/Nagios plugin for checking asterisk status, detect long calls, disconnected SIP peers and get some stats.
+Icinga/Nagios plugin for checking asterisk status, ~~detect long calls~~, disconnected SIP peers and get some stats.
 
 Tested with **PHP 5.6** and **Asterisk 13.X**
 
