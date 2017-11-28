@@ -7,7 +7,7 @@ Tested with **PHP 5.6** and **Asterisk 13.X**
 ## Installation
 
 - Copy [check_asterisk.php](check_asterisk.php) to Icinga/Nagios `PluginDir`
-- Copy [asterisk-commnand.conf](icinga/asterisk-commnand.conf) and [asterisk-service.conf](icinga/asterisk-service.conf) to `Icinga config dir/conf.d`, usually `/etc/icinga2/conf.d`
+- Copy [asterisk-commnand.conf](icinga/asterisk-command.conf) and [asterisk-service.conf](icinga/asterisk-service.conf) to `Icinga config dir/conf.d`, usually `/etc/icinga2/conf.d`
 - Add new user in manager.conf from [manager.conf](asterisk/manager.conf)
 
 ## How to use
