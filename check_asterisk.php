@@ -1,21 +1,24 @@
 #!/usr/bin/env php
 <?php
-//error_reporting(0);
 
 /**
  * Show usage help
  */
 function usage() {
-    $usage = "Usage: check_asterisk.php -H <hostname> -P <port> -u <user> -p <password> -t <seconds>." . PHP_EOL
-            . "       -H hostname" . PHP_EOL
-            . "       -P port" . PHP_EOL
-            . "       -u username" . PHP_EOL
-            . "       -p password" . PHP_EOL
-            . "       -t read timeout" . PHP_EOL
-            . "       -w unconnected peers WARNING threshold" . PHP_EOL
-            . "       -c unconnected peers CRITICAL threshold" . PHP_EOL
-            . "       -W long call WARNING threshold (in seconds) (NOT IMPLEMENTED!)" . PHP_EOL
-            . "       -C long call CRITICAL threshold (in seconds) (NOT IMPLEMENTED!)" . PHP_EOL
+    $usage = "Usage: check_asterisk.php -H <hostname> -P <port> -u <user> -p <password> -t <seconds> " . PHP_EOL
+            . "       [-w unconnected WARNING] [-c unconnected CRITICAL] [-W long call WARNING] [-C long call CRITICAL] " . PHP_EOL
+            . "       [-v] [-l logfile] " . PHP_EOL
+            . "       -H <hostname>" . PHP_EOL
+            . "       -P <port>" . PHP_EOL
+            . "       -u <username>" . PHP_EOL
+            . "       -p <password>" . PHP_EOL
+            . "       -t <read timeout>" . PHP_EOL
+            . "       -v verbose output" . PHP_EOL
+            . "       [-w #] unconnected peers WARNING threshold" . PHP_EOL
+            . "       [-c #] unconnected peers CRITICAL threshold" . PHP_EOL
+            . "       [-W #] long call WARNING threshold (in seconds) (NOT IMPLEMENTED!)" . PHP_EOL
+            . "       [-C #] long call CRITICAL threshold (in seconds) (NOT IMPLEMENTED!)" . PHP_EOL
+            . "       [-l logfile] log output to file (relative to /var/log/)" . PHP_EOL
             . PHP_EOL . "You need add new user in manager.conf:" . PHP_EOL
             . "[<USER>] ; username (-u option)" . PHP_EOL
             . "displayconnects = no" . PHP_EOL
@@ -25,19 +28,16 @@ function usage() {
             . "read = system,call,log,verbose,command,agent,user,config,all ; Read privileges" . PHP_EOL
             . "write = command ; Write privileges" . PHP_EOL;
     echo ($usage . PHP_EOL);
-
     exit(0);
 }
 
 /**
  * Check commandline options
- * @global array $options - Parsed commandline options
+ * @return array $options - Parsed commandline options
  */
 function checkOptions() {
-    global $options;
-
     $requiredOpts = 'H:P:u:p:t:';
-    $additionslOpts = 'W:w:C:c:';
+    $additionslOpts = 'W:w:C:c:vl:';
     $options = getopt($requiredOpts . $additionslOpts);
     foreach (explode(':', $requiredOpts)as $option) {
         if ($option) {
@@ -47,6 +47,7 @@ function checkOptions() {
             }
         }
     }
+    return $options;
 }
 
 /**
@@ -108,9 +109,12 @@ function action($action, $parameters = array(), $events = 'Off') {
     stream_set_timeout($connection, $options['t']);
     fputs($connection, $actionStr);
     do {
-        $line = trim(fgets($connection, 4096));
+        $line = trim(fgets($connection, 4096), "\r\n");
         if ($line != '') {
-            if ($line == 'EventList: Complete' || strpos($line, 'Response: ') !== FALSE || $line == 'Event: StatusComplete' || $line == '--END COMMAND--') {
+            if ($line == 'EventList: Complete' ||
+                    strpos($line, 'Response: ') !== FALSE ||
+                    $line == 'Event: StatusComplete' ||
+                    $line == '--END COMMAND--') {
                 $list_complete = true;
             }
             $respArray = explode(': ', $line);
@@ -188,6 +192,45 @@ function showResult($status, $statusString, $perfData = array(), $additions = ''
 }
 
 /**
+ * Concatenate array into string
+ * @param array|string $array - Array with key=>value pairs
+ * @return string             - Imploded string
+ */
+function implodeArray($array) {
+    $return = $array;
+    if (is_array($array)) {
+        foreach ($array as $key => $value) {
+            if ($return != '') {
+                $return .= PHP_EOL;
+            }
+            $return .= $key . " = " . $value;
+        }
+    }
+    return $return;
+}
+
+/**
+ * Strange magic...
+ * Split table header string into regexp 
+ * for splitting table rows to cells
+ * @param string $tableHeaders - First line of table
+ * @return string              - Returning regexp
+ */
+function getPattern($tableHeaders) {
+    $pattern = '';
+    $columns = array();
+    $prev = 0;
+    foreach (preg_split('|[\s]+|', $tableHeaders, -1, PREG_SPLIT_OFFSET_CAPTURE) as $key => $column) {
+        $columns[] = str_replace('/', '', $column[0]);
+        if (($key != 0) && ($key < count($columns))) {
+            $pattern .= "(?<" . $columns[count($columns) - 2] . ">.{" . ($column[1] - $prev) . "})";
+        }
+        $prev = $column[1];
+    }
+    return $pattern;
+}
+
+/**
  * Get asterisk uptime
  * @global array $options - Parsed commandline options
  * @return array          - Uptime data
@@ -241,24 +284,29 @@ function users() {
     $connected = 0;
     $disconnected = 0;
     $response['sip_disconected'] = array();
-    foreach ($response['response'][0]['output'] as $key => $val) {
-        $peer = preg_split('|[\s]+|', $val);
-        if (count($peer) >= 6 && count($peer) < 9) {
-            $response['response'][0]['output'][$key] = $peer;
-            if ($peer[1] == '(Unspecified)') {
-                $disconnected++;
-                $response['sip_disconected'][] = $peer[0];
-            } else {
+    $pattern = getPattern(array_shift($response['response'][0]['output']));
+    foreach ($response['response'][0]['output'] as $val) {
+        $cells = array();
+        preg_match_all('~^' . $pattern . '(.*)$~', $val, $cells, PREG_SET_ORDER);
+        if (count($cells) > 0) {
+            if (strpos(trim($cells[0]['Status']), 'OK') === 0) {
                 $connected++;
+            } elseif (trim($cells[0]['Status']) == 'Unmonitored') { // Unmonitored SIP Users ()
+                if (preg_match('/([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/', $cells[0]['Host'])) {
+                    $connected++;
+                } else {
+                    $response['sip_disconected'][trim($cells[0]['Nameusername'])] = trim($cells[0]['Host']);
+                    $disconnected++;
+                }
+            } else { // Monitored, but disconected
+                $response['sip_disconected'][trim($cells[0]['Nameusername'])] = trim($cells[0]['Status']);
+                $disconnected++;
             }
-        } else {
-            unset($response['response'][0]['output'][$key]);
         }
     }
     $response['connected'] = $connected;
     $response['disconnected'] = $disconnected;
     $response['sip_peers'] = count($response['response'][0]['output']);
-
     return $response;
 }
 
@@ -285,6 +333,49 @@ function checkStatus($opt_warn, $opt_crit, $value, $infoText) {
     }
 }
 
+/**
+ * Search long calls (only for SIP users)
+ * @global array $options - Parsed commandline options
+ * @param type $users     - List SIP users
+ * @return array          - Long calls list
+ */
+function longCalls($users) {
+    global $options;
+
+    if (isset($options['W']) || isset($options['C'])) {
+        $response = action('Command', array('Command' => "core show channels"));
+        print_r($response);
+    }
+    return $response;
+}
+
+/**
+ * Concatenate verbose text ad write log if nessecary
+ * @global string|null $verbose - Concatenated verbose text or null when verbose is disabled
+ * @global string|null $logfile - Logfile to write log
+ * @param mixed $text           - Verbose text for add to output
+ * @return string|null          - Concatenated verbose text or null when verbose is disabled
+ */
+function verbose($text = '') {
+    global $verbose, $logfile;
+
+    // Add text to verbose output
+    if (!is_null($verbose)) {
+        if (!is_string($text)) {
+            $text = print_r($text, 1);
+        }
+        $verbose .= PHP_EOL . $text;
+    }
+    // Add text to log output
+    if (!is_null($logfile) && $logfile !== false) {
+        if (!is_string($text)) {
+            $text = print_r($text, 1);
+        }
+        file_put_contents($logfile, $text . PHP_EOL, FILE_APPEND);
+    }
+    return $verbose;
+}
+
 define('OK', 0);
 define('WARNING', 1);
 define('CRITICAL', 2);
@@ -295,18 +386,47 @@ $statusText = array(
     CRITICAL => 'CRITICAL',
     UNKNOWN  => 'UNKNOWN',
 );
-$options = array();
+
+$verbose = '';
+$error = '';
 $connection = false;
 $status = OK;
 $startTime = microtime();
 $perfData = array();
-checkOptions();
+
+/* Main part */
+$options = checkOptions();
+if (!isset($options['v'])) {
+    $verbose = null;
+    error_reporting(0);
+}
+if (isset($options['l'])) {
+    $logfile = '/var/log/' . $options['l'];
+    if (file_exists(dirname($logfile)) && !is_writable(dirname($logfile))) {
+        $error .= 'LOGFILE: directory ' . dirname($logfile) . ' not writable.' . PHP_EOL;
+        $logfile = false;
+    } else {
+        if (!file_exists(dirname($logfile)) && !mkdir(dirname($logfile), 0777, true)) {
+            $error .= 'LOGFILE: Cannot create directory: ' . dirname($logfile) . '.';
+            $logfile = false;
+        }
+        if (!touch($logfile)) {
+            $error .= 'LOGFILE: Directory ' . dirname($logfile) . ' not writable.' . PHP_EOL;
+            $logfile = false;
+        }
+    }
+} else {
+    $logfile = null;
+}
+verbose($options);
+
 $connect = connect($options['H'], $options['P']);
 if ($status !== OK) {
     showResult($status, $connect, '');
 }
 
 $login = login($options['u'], $options['p']);
+verbose($login);
 $perfData['time'] = microtime() - $startTime;
 if ($login['timed_out'] == true) {
     showResult(WARNING, 'Login command timed out (may be you need incresase read timeout?)', $perfData);
@@ -317,26 +437,31 @@ if ($login['response'][0]['Response'] == 'Error') {
 $info = $connect;
 // Uptime
 $uptime = getUptime();
+verbose($uptime);
 $perfData['system_uptime'] = $uptime['System uptime'] . 's';
 $perfData['last_reload'] = $uptime['Last reload'] . 's';
 // Calls
 $calls = calls();
+verbose($calls);
 $perfData['active_calls'] = $calls['active'];
 $perfData['processed_calls'] = $calls['calls'] . 'c';
 // Connected and unconnected users
 $users = users();
+verbose($users);
 $perfData['connected'] = $users['connected'];
 $perfData['disconnected'] = $users['disconnected'];
 $perfData['sip_peers'] = $users['sip_peers'];
 checkStatus('w', 'c', $perfData['disconnected'], 'Disconnected users: ' . $perfData['disconnected']);
 if (count($users['sip_disconected']) == 0) {
-    $users['sip_disconected'][] = 'NONE';
+    $users['sip_disconected'] = 'NONE';
 }
-//print_r($options);
-//print_r($users);
 // Long calls
-// $longCalls = 
+//$longCalls = longCalls($users['response'][0]['output']);
 // Logoff and close
 logoff();
 fclose($connection);
-showResult($status, $info, $perfData, "Disconected peers:\n" . implode("\n", $users['sip_disconected']));
+
+showResult($status, $info, $perfData, "Disconected peers:\n"
+        . implodeArray($users['sip_disconected']) . PHP_EOL
+        . (string)$error
+        . (string)$verbose);
