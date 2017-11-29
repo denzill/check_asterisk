@@ -427,7 +427,7 @@ if ($status !== OK) {
 
 $login = login($options['u'], $options['p']);
 verbose($login);
-$perfData['time'] = microtime() - $startTime;
+$perfData['time'] = (microtime() - $startTime);
 if ($login['timed_out'] == true) {
     showResult(WARNING, 'Login command timed out (may be you need incresase read timeout?)', $perfData);
 }
