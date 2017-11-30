@@ -124,6 +124,9 @@ function action($action, $parameters = array(), $events = 'Off') {
                 $wrets[$event]['output'][] = $respArray[0];
             }
         } else {
+            if ($wrets[$event]['EventList'] == 'start') {
+                $list_complete = false;
+            }
             $event++;
             if ($list_complete == true) {
                 break;
@@ -196,14 +199,35 @@ function showResult($status, $statusString, $perfData = array(), $additions = ''
  * @param array|string $array - Array with key=>value pairs
  * @return string             - Imploded string
  */
-function implodeArray($array) {
+function implodeArray($array, $glue = ' = ') {
     $return = $array;
     if (is_array($array)) {
+        $return = '';
         foreach ($array as $key => $value) {
             if ($return != '') {
                 $return .= PHP_EOL;
             }
-            $return .= $key . " = " . $value;
+            $return .= $key . $glue . $value;
+        }
+    }
+    return $return;
+}
+
+/**
+ * Put Events to array
+ * @param array $responseArray - Initial response
+ * @param string $actionID     - ActionID for pick events
+ * @return array               - Events array
+ */
+function getEventList($responseArray, $actionID) {
+    $return = array();
+    foreach ($responseArray as $value) {
+        if (is_array($value) &&
+                isset($value['ActionID']) &&
+                $value['ActionID'] == $actionID) {
+            if (isset($value['Event'])) {
+                $return[$value['Event']][] = $value;
+            }
         }
     }
     return $return;
@@ -276,37 +300,28 @@ function calls() {
 function users() {
     global $options;
 
-    $response = action('Command', array('Command' => "sip Show peers"));
+    $response = action('SIPPeers', array('ActionID' => 'SIPPeers'));
     if ($response['response'][0]['Response'] == 'Error') {
-        showResult(WARNING, 'Get calls counter failed: ' . $response['response'][0]['Message'] . ', may be need "command" write privilege for user ' . $options['u']
-                . ' in file manager.conf (write=command)');
+        showResult(WARNING, 'Get calls counter failed: ' . $response['response'][0]['Message'] . ', may be need "system" write privilege for user ' . $options['u']
+                . ' in file manager.conf (write=system,...)');
     }
     $connected = 0;
     $disconnected = 0;
     $response['sip_disconected'] = array();
-    $pattern = getPattern(array_shift($response['response'][0]['output']));
-    foreach ($response['response'][0]['output'] as $val) {
-        $cells = array();
-        preg_match_all('~^' . $pattern . '(.*)$~', $val, $cells, PREG_SET_ORDER);
-        if (count($cells) > 0) {
-            if (strpos(trim($cells[0]['Status']), 'OK') === 0) {
-                $connected++;
-            } elseif (trim($cells[0]['Status']) == 'Unmonitored') { // Unmonitored SIP Users ()
-                if (preg_match('/([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/', $cells[0]['Host'])) {
-                    $connected++;
-                } else {
-                    $response['sip_disconected'][trim($cells[0]['Nameusername'])] = trim($cells[0]['Host']);
-                    $disconnected++;
-                }
-            } else { // Monitored, but disconected
-                $response['sip_disconected'][trim($cells[0]['Nameusername'])] = trim($cells[0]['Status']);
-                $disconnected++;
-            }
+    $events = getEventList($response['response'], 'SIPPeers');
+    foreach ($events['PeerEntry'] as $peer) {
+        if ($peer['Status'] == 'UNKNOWN' ||
+                $peer['Status'] == 'UNREACHABLE' ||
+                $peer['IPaddress'] == '-none-') {
+            $response['sip_disconected'][$peer['ObjectName']] = 'Last IP - "' . $peer['IPaddress'].'".';
+            $disconnected++;
+        } else {
+            $connected++;
         }
     }
     $response['connected'] = $connected;
     $response['disconnected'] = $disconnected;
-    $response['sip_peers'] = count($response['response'][0]['output']);
+    $response['sip_peers'] = ($connected + $disconnected);
     return $response;
 }
 
@@ -343,8 +358,8 @@ function longCalls($users) {
     global $options;
 
     if (isset($options['W']) || isset($options['C'])) {
-        $response = action('Command', array('Command' => "core show channels"));
-        print_r($response);
+        $response = action('Sippeers', array('ActionID' => 'longCalls'));
+//        print_r($response);
     }
     return $response;
 }
@@ -462,6 +477,6 @@ logoff();
 fclose($connection);
 
 showResult($status, $info, $perfData, "Disconected peers:\n"
-        . implodeArray($users['sip_disconected']) . PHP_EOL
+        . implodeArray($users['sip_disconected'], ': ') . PHP_EOL
         . (string)$error
         . (string)$verbose);

@@ -25,11 +25,11 @@ $ check_asterisk.php -H <hostname> -P <port> -u <user> -p <password> -t <seconds
 - `[-v]` - Verbose output (to stdout)
 - `[-w #]` - Unconnected peers WARNING threshold
 - `[-c #]` - Unconnected peers CRITICAL threshold
-- `[-W #]` - Long call WARNING threshold (in seconds) (<span style="color:red">**NOT IMPLEMENTED!**</span>)
-- `[-C #]` - Long call CRITICAL threshold (in seconds) (<span style="color:red">**NOT IMPLEMENTED!**</span>)
+- `[-W #]` - Long call WARNING threshold (in seconds) (**NOT IMPLEMENTED!**)
+- `[-C #]` - Long call CRITICAL threshold (in seconds) (**NOT IMPLEMENTED!**)
 - `[-l logfile]` - log output to file (relative to /var/log/)
 
-**\<option\>** - required option, **[option]** - optional option
+`<option>` - required option, `[option]` - optional option
 
 ## TODO
 - [x] Disconnected peers detect
