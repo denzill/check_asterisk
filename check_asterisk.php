@@ -37,7 +37,7 @@ function usage() {
  */
 function checkOptions() {
     $requiredOpts = 'H:P:u:p:t:';
-    $additionslOpts = 'W:w:C:c:vl:';
+    $additionslOpts = 'W:w:C:c:vl:iIm';
     $options = getopt($requiredOpts . $additionslOpts);
     foreach (explode(':', $requiredOpts)as $option) {
         if ($option) {
@@ -92,7 +92,7 @@ function login($user, $pass) {
  * @param string $events      - On/Off enable or disable event listening
  * @return array              - Action result
  */
-function action($action, $parameters = array(), $events = 'Off') {
+function action($action, $parameters = array(), $events = 'Off', $stop = true) {
     global $connection, $options;
 
     if (!is_array($parameters)) {
@@ -104,15 +104,16 @@ function action($action, $parameters = array(), $events = 'Off') {
     }
     $actionStr = implode("\r\n", $actionArray) . "\r\n\r\n";
     $event = 0;
-    $wrets = array('action' => $action);
+    $wrets = array('action' => $action, 'raw' => array());
     $list_complete = false;
     stream_set_timeout($connection, $options['t']);
     fputs($connection, $actionStr);
     do {
         $line = trim(fgets($connection, 4096), "\r\n");
+        $wrets['raw'][] = $line;
         if ($line != '') {
             if ($line == 'EventList: Complete' ||
-                    strpos($line, 'Response: ') !== FALSE ||
+                    (strpos($line, 'Response: ') !== FALSE && $line !== 'Response: Follows') ||
                     $line == 'Event: StatusComplete' ||
                     $line == '--END COMMAND--') {
                 $list_complete = true;
@@ -121,14 +122,14 @@ function action($action, $parameters = array(), $events = 'Off') {
             if (count($respArray) == 2) {
                 $wrets[$event][$respArray[0]] = $respArray[1];
             } else {
-                $wrets[$event]['output'][] = $respArray[0];
+                $wrets[$event]['output'][] = $line;
             }
         } else {
             if ($wrets[$event]['EventList'] == 'start') {
                 $list_complete = false;
             }
             $event++;
-            if ($list_complete == true) {
+            if (($list_complete == true) && ($stop == true)) {
                 break;
             }
         }
@@ -308,13 +309,17 @@ function users() {
     $connected = 0;
     $disconnected = 0;
     $response['sip_disconected'] = array();
+    $response['peers'] = array();
     $events = getEventList($response['response'], 'SIPPeers');
     foreach ($events['PeerEntry'] as $peer) {
+        $response['peers'][$peer['ObjectName']] = $peer;
         if ($peer['Status'] == 'UNKNOWN' ||
                 $peer['Status'] == 'UNREACHABLE' ||
                 $peer['IPaddress'] == '-none-') {
-            $response['sip_disconected'][$peer['ObjectName']] = 'Last IP - "' . $peer['IPaddress'].'".';
-            $disconnected++;
+            if ($peer['Status'] == 'Unmonitored' && !isset($options['m'])) {
+                $response['sip_disconected'][$peer['ObjectName']] = 'Last IP - "' . $peer['IPaddress'] . '".';
+                $disconnected++;
+            }
         } else {
             $connected++;
         }
@@ -327,41 +332,109 @@ function users() {
 
 /**
  * Check value for warning and critical threshold
- * @global array $options - Parsed commandline options
- * @global type $info     - Service status explanation text
- * @param type $opt_warn  - Warning commandline parameter
- * @param type $opt_crit  - Critical commandline parameter
- * @param type $value     - Value for checking
- * @param type $infoText  - Text for add to $info if status is changed
+ * @global array $options  - Parsed commandline options
+ * @global type $info      - Service status explanation text
+ * @param type $opt_warn   - Warning commandline parameter
+ * @param type $opt_crit   - Critical commandline parameter
+ * @param type $opt_ignore - Ignore commandline parameter
+ * @param type $value      - Value for checking
+ * @param type $infoText   - Text for add to $info if status is changed
  */
-function checkStatus($opt_warn, $opt_crit, $value, $infoText) {
+function checkStatus($opt_warn, $opt_crit, $opt_ignore, $value, $infoText = '') {
     global $options, $info;
 
+    $status = OK; // Local status
     if (isset($options[$opt_crit]) && $options[$opt_crit] <= $value) {
-        if (setStatus(CRITICAL)) {
-            $info .= ', ' . $infoText;
+        $info .= ', ' . $infoText;
+        if (!isset($options[$opt_ignore]) && setStatus(CRITICAL)) {
+            $status = CRITICAL;
         }
     } elseif (isset($options[$opt_warn]) && $options[$opt_warn] <= $value) {
-        if (setStatus(WARNING)) {
-            $info .= ', ' . $infoText;
+        $info .= ', ' . $infoText;
+        if (!isset($options[$opt_ignore]) && setStatus(WARNING)) {
+            $status = WARNING;
         }
     }
+    return $status;
 }
 
 /**
- * Search long calls (only for SIP users)
- * @global array $options - Parsed commandline options
- * @param type $users     - List SIP users
- * @return array          - Long calls list
+ * Check commandline options for exist
+ * @global array $options   - Parsed commandline options
+ * @param mixed $optionList - Options for check
+ * @return boolean          - True if at least one of checked options exist
  */
-function longCalls($users) {
+function optionExists($optionList) {
     global $options;
 
-    if (isset($options['W']) || isset($options['C'])) {
-        $response = action('Sippeers', array('ActionID' => 'longCalls'));
-//        print_r($response);
+    $return = false;
+    if (!is_array($optionList)) {
+        $optionList = array($optionList);
     }
-    return $response;
+    foreach ($optionList as $opt) {
+        if (isset($options[$opt])) {
+            $return = true;
+        }
+    }
+    return $return;
+}
+
+function getPeer($callId) {
+    global $channels;
+
+    $return = null;
+    if (is_null($channels)) {
+        $channels = array_slice(action('Command', array('Command' => 'sip show channels'), 'Off')['response']['raw'], 3, -3);
+        verbose($channels);
+    }
+    foreach ($channels as $subject) {
+        $channel = preg_split('|[\s]+|', $subject);
+        verbose($channel);
+        if (strpos($channel[2], $callId) !== -1) {
+            $return = $channel[7];
+            break;
+        }
+    }
+    return $return;
+}
+
+/**
+ * Detect long calls
+ * @global array $options - Parsed commandline options
+ * @return array          - Long calls list
+ */
+function longCalls() {
+    global $options;
+
+    $return = array(
+        'longCalls' => 0,
+        'status' => OK,
+        'longCrit' => array(),
+        'longWarn' => array(),
+        'channels' => array(),
+    );
+    if (optionExists(array('W', 'C'))) {
+        $stats = action('Status', array('ActionId' => 'longCALLS'), 'Off');
+        $events = getEventList($stats['response'], 'longCALLS');
+        verbose($events);
+        foreach ($events['Status'] as $channelStatus) {
+            $return['channels'][$channelStatus['Channel']] = $channelStatus;
+            if (optionExists('C') && $channelStatus['Seconds'] > $options['C']) {
+                $return['longCalls'] = $return['longCalls'] + 1;
+                $return['status'] = CRITICAL;
+                $return['longCrit'][$channelStatus['Channel']] = gmdate("H:i:s", $channelStatus['Seconds']);
+                continue;
+            }
+            if (optionExists('W') && $channelStatus['Seconds'] > $options['W']) {
+                if ($return['status'] != CRITICAL) {
+                    $return['status'] = WARNING;
+                }
+                $return['longCalls'] = $return['longCalls'] + 1;
+                $return['longWarn'][$channelStatus['Channel']] = gmdate("H:i:s", $channelStatus['Seconds']);
+            }
+        }
+    }
+    return $return;
 }
 
 /**
@@ -396,10 +469,10 @@ define('WARNING', 1);
 define('CRITICAL', 2);
 define('UNKNOWN', 3);
 $statusText = array(
-    OK       => 'OK',
-    WARNING  => 'WARNING',
+    OK => 'OK',
+    WARNING => 'WARNING',
     CRITICAL => 'CRITICAL',
-    UNKNOWN  => 'UNKNOWN',
+    UNKNOWN => 'UNKNOWN',
 );
 
 $verbose = '';
@@ -408,6 +481,7 @@ $connection = false;
 $status = OK;
 $startTime = microtime();
 $perfData = array();
+$channels = null;
 
 /* Main part */
 $options = checkOptions();
@@ -435,11 +509,13 @@ if (isset($options['l'])) {
 }
 verbose($options);
 
+/* ----- Connect ----- */
 $connect = connect($options['H'], $options['P']);
 if ($status !== OK) {
     showResult($status, $connect, '');
 }
 
+/* ----- Login ----- */
 $login = login($options['u'], $options['p']);
 verbose($login);
 $perfData['time'] = (microtime() - $startTime);
@@ -450,7 +526,8 @@ if ($login['response'][0]['Response'] == 'Error') {
     showResult(WARNING, 'Login command failed: ' . $login['response'][0]['Message'] . '. Do you add user in manager.conf and execute "asterisk -rx "manager reload"?', $perfData);
 }
 $info = $connect;
-// Uptime
+
+/* ----- Uptime ----- */
 $uptime = getUptime();
 verbose($uptime);
 $perfData['system_uptime'] = $uptime['System uptime'] . 's';
@@ -466,17 +543,30 @@ verbose($users);
 $perfData['connected'] = $users['connected'];
 $perfData['disconnected'] = $users['disconnected'];
 $perfData['sip_peers'] = $users['sip_peers'];
-checkStatus('w', 'c', $perfData['disconnected'], 'Disconnected users: ' . $perfData['disconnected']);
+checkStatus('w', 'c', 'i', $perfData['disconnected'], 'Disconnected peers: ' . $perfData['disconnected']);
 if (count($users['sip_disconected']) == 0) {
     $users['sip_disconected'] = 'NONE';
 }
 // Long calls
-//$longCalls = longCalls($users['response'][0]['output']);
+$longCalls = longCalls();
+$longChannels = '';
+if ($longCalls['status'] != OK) {
+    $longChannels = 'Critically long calls:' . PHP_EOL;
+    $longChannels .= implodeArray($longCalls['longCrit'], "\t") . PHP_EOL;
+    $longChannels .= 'Long calls:' . PHP_EOL;
+    $longChannels .= implodeArray($longCalls['longWarn'], "\t") . PHP_EOL;
+    if (!optionExists('I')) {
+        setStatus($longCalls['status']);
+        $info .= ', Critically long calls: ' . count($longCalls['longCrit']);
+        $info .= ', Long calls: ' . count($longCalls['longWarn']);
+    }
+}
 // Logoff and close
 logoff();
 fclose($connection);
 
 showResult($status, $info, $perfData, "Disconected peers:\n"
         . implodeArray($users['sip_disconected'], ': ') . PHP_EOL
-        . (string)$error
-        . (string)$verbose);
+        . (string) $longChannels
+        . (string) $error
+        . (string) $verbose);
