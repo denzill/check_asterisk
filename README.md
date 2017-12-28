@@ -1,6 +1,6 @@
 # check_asterisk
 
-[Icinga2](https://www.icinga.com/) or [Nagios](https://www.nagios.org/) plugin for checking asterisk status, ~~detect long calls~~, disconnected SIP peers and get some stats.
+[Icinga2](https://www.icinga.com/) or [Nagios](https://www.nagios.org/) plugin for checking asterisk status, detect long calls, disconnected SIP peers and get some stats.
 
 Tested with [PHP >= 5.4.16](http://php.net/), [Asterisk 13](https://www.asterisk.org/) and [Icinga2](https://www.icinga.com/)
 
@@ -13,7 +13,7 @@ Tested with [PHP >= 5.4.16](http://php.net/), [Asterisk 13](https://www.asterisk
 
 ## How to use
 ```
-$ check_asterisk.php -H <hostname> -P <port> -u <user> -p <password> -t <seconds> [-w unconnected WARNING] [-c unconnected CRITICAL] [-W long call WARNING] [-C long call CRITICAL] [-v] [-l logfile]
+$ check_asterisk.php -H <hostname> -P <port> -u <user> -p <password> -t <seconds> [-w unconnected WARNING] [-c unconnected CRITICAL] [-m] [-i] [-W long call WARNING] [-C long call CRITICAL] [-I] [-v] [-l logfile]
 ```
 
 ### Options summary
