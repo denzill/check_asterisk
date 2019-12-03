@@ -119,13 +119,37 @@ function action($action, $parameters = array(), $events = 'Off', $stop = true) {
                 $list_complete = true;
             }
             $respArray = explode(': ', $line);
-            if (count($respArray) == 2) {
-                $wrets[$event][$respArray[0]] = $respArray[1];
-            } else {
-                $wrets[$event]['output'][] = $line;
+            switch (count($respArray)) {
+                case 3: {
+                        if (isset($wrets[$event][$respArray[1]])) {
+                            if (!is_array($wrets[$event][$respArray[1]])) {
+                                $wrets[$event][$respArray[1]] = [$wrets[$event][$respArray[1]]];
+                                $wrets[$event][$respArray[1]][] = $respArray[2];
+                            }
+                        } else {
+                            $wrets[$event][$respArray[1]] = $respArray[2];
+                        }
+                        break;
+                    }
+                case 2: {
+                        if (isset($wrets[$event][$respArray[0]])) {
+                            if (!is_array($wrets[$event][$respArray[0]])) {
+                                $wrets[$event][$respArray[0]] = [$wrets[$event][$respArray[0]]];
+                                $wrets[$event][$respArray[0]][] = $respArray[1];
+                            }
+                        } else {
+                            $wrets[$event][$respArray[0]] = $respArray[1];
+                        }
+                        break;
+                        break;
+                    }
+                default: {
+                        $wrets[$event]['output'][] = $line;
+                        break;
+                    }
             }
         } else {
-            if ($wrets[$event]['EventList'] == 'start') {
+            if (isset($wrets[$event]['EventList']) && $wrets[$event]['EventList'] == 'start') {
                 $list_complete = false;
             }
             $event++;
@@ -284,7 +308,7 @@ function calls() {
         showResult(WARNING, 'Get calls counter failed: ' . $response['response'][0]['Message'] . ', may be need "command" write privilege for user ' . $options['u']
                 . ' in file manager.conf (write=command)');
     }
-    foreach ($response['response'][0]['output'] as $key) {
+    foreach ($response['response'][0]['Output'] as $key) {
         $resp = explode(' ', $key);
         if (count($resp) == 3) {
             $response[$resp[1]] = $resp[0];
@@ -408,10 +432,10 @@ function longCalls() {
 
     $return = array(
         'longCalls' => 0,
-        'status' => OK,
-        'longCrit' => array(),
-        'longWarn' => array(),
-        'channels' => array(),
+        'status'    => OK,
+        'longCrit'  => array(),
+        'longWarn'  => array(),
+        'channels'  => array(),
     );
     if (optionExists(array('W', 'C'))) {
         $stats = action('Status', array('ActionId' => 'longCALLS'), 'Off');
@@ -469,17 +493,17 @@ define('WARNING', 1);
 define('CRITICAL', 2);
 define('UNKNOWN', 3);
 $statusText = array(
-    OK => 'OK',
-    WARNING => 'WARNING',
+    OK       => 'OK',
+    WARNING  => 'WARNING',
     CRITICAL => 'CRITICAL',
-    UNKNOWN => 'UNKNOWN',
+    UNKNOWN  => 'UNKNOWN',
 );
 
 $verbose = '';
 $error = '';
 $connection = false;
 $status = OK;
-$startTime = microtime();
+$startTime = microtime(true);
 $perfData = array();
 $channels = null;
 
@@ -518,7 +542,7 @@ if ($status !== OK) {
 /* ----- Login ----- */
 $login = login($options['u'], $options['p']);
 verbose($login);
-$perfData['time'] = (microtime() - $startTime);
+$perfData['time'] = (microtime(true) - $startTime);
 if ($login['timed_out'] == true) {
     showResult(WARNING, 'Login command timed out (may be you need incresase read timeout?)', $perfData);
 }
@@ -532,12 +556,14 @@ $uptime = getUptime();
 verbose($uptime);
 $perfData['system_uptime'] = $uptime['System uptime'] . 's';
 $perfData['last_reload'] = $uptime['Last reload'] . 's';
-// Calls
+
+/* ----- Calls ----- */
 $calls = calls();
 verbose($calls);
 $perfData['active_calls'] = $calls['active'];
 $perfData['processed_calls'] = $calls['calls'] . 'c';
-// Connected and unconnected users
+
+/* ----- Connected and unconnected users ----- */
 $users = users();
 verbose($users);
 $perfData['connected'] = $users['connected'];
